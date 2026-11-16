@@ -1,0 +1,1674 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>白蘿蔔種植模擬器 | 3D 食農與職業教育互動教具</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js r128 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Google Fonts: Noto Sans TC -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Noto Sans TC', sans-serif;
+      background-color: #f0fdf4;
+      touch-action: manipulation;
+    }
+
+    /* 脈衝鷹架提示光暈 */
+    @keyframes scaffoldPulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75);
+        transform: scale(1);
+      }
+      50% {
+        box-shadow: 0 0 0 12px rgba(245, 158, 11, 0);
+        transform: scale(1.02);
+      }
+    }
+    .scaffold-highlight {
+      animation: scaffoldPulse 1.8s infinite ease-in-out;
+      border: 3px solid #f59e0b !important;
+      background-color: #fffbeb !important;
+    }
+
+    /* 向上滑動箭頭動畫 */
+    @keyframes swipeUpFloat {
+      0% {
+        transform: translateY(16px);
+        opacity: 0.25;
+      }
+      50% {
+        transform: translateY(-10px);
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(-34px);
+        opacity: 0;
+      }
+    }
+    .swipe-arrow-anim {
+      animation: swipeUpFloat 1.5s infinite ease-out;
+    }
+
+    /* 慶祝星星彈跳 */
+    @keyframes starPop {
+      0% { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+      70% { transform: scale(1.15) rotate(5deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    .star-pop {
+      animation: starPop 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
+    /* 隱藏捲軸但保留可捲動性（小螢幕相容） */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="w-screen h-screen overflow-hidden flex flex-col md:flex-row bg-emerald-50 text-slate-800">
+
+  <!-- 左側 80%：3D 半透明剖面互動舞台 -->
+  <main id="viewport-container" class="relative w-full h-[65%] md:w-[80%] md:h-full overflow-hidden bg-gradient-to-b from-sky-100 via-emerald-50 to-amber-50">
+    <canvas id="three-canvas" class="block w-full h-full cursor-pointer"></canvas>
+
+    <!-- 左上角標題與目前關卡膠囊標籤 -->
+    <div class="absolute top-3 left-3 md:top-4 md:left-4 z-10 flex flex-wrap items-center gap-2 pointer-events-none">
+      <div class="bg-white/95 backdrop-blur-md px-4 py-2 rounded-2xl shadow-md border border-emerald-200 flex items-center gap-2.5">
+        <span class="text-2xl">🌱</span>
+        <div>
+          <h1 class="text-base md:text-lg font-black text-emerald-900 leading-tight">白蘿蔔種植模擬器</h1>
+          <p id="mode-badge" class="text-xs font-bold text-amber-700">目前模式：學習模式（含提示）</p>
+        </div>
+      </div>
+
+      <div id="scene-prompt-banner" class="bg-emerald-700/95 text-white px-4 py-2 rounded-2xl shadow-md border border-emerald-500 flex items-center gap-2">
+        <span id="stage-badge-num" class="bg-white text-emerald-800 font-black text-xs md:text-sm px-2.5 py-0.5 rounded-full">第 1 關</span>
+        <span id="stage-banner-text" class="text-sm md:text-base font-bold tracking-wide">將培養土裝到花盆裡</span>
+      </div>
+    </div>
+
+    <!-- 右上角懸浮功能鍵（語音開關、老師設定、重新開始） -->
+    <div class="absolute top-3 right-3 md:top-4 md:right-4 z-20 flex items-center gap-2">
+      <button id="btn-mute-toggle" type="button" aria-label="切換語音與音效"
+        class="min-h-[56px] min-w-[56px] px-3.5 bg-white/95 hover:bg-emerald-50 active:scale-95 text-slate-800 font-bold rounded-2xl shadow-md border-2 border-slate-200 flex items-center justify-center gap-1.5 transition">
+        <span id="mute-icon" class="text-xl">🔊</span>
+        <span id="mute-label" class="hidden lg:inline text-sm">聲音開啟</span>
+      </button>
+
+      <button id="btn-teacher-settings" type="button" aria-label="開啟老師設定"
+        class="min-h-[56px] min-w-[56px] px-3.5 bg-white/95 hover:bg-amber-50 active:scale-95 text-slate-800 font-bold rounded-2xl shadow-md border-2 border-amber-300 flex items-center justify-center gap-1.5 transition">
+        <span class="text-xl">⚙️</span>
+        <span class="hidden sm:inline text-sm text-amber-900">老師設定</span>
+      </button>
+
+      <button id="btn-reset-top" type="button" aria-label="重新種植"
+        class="min-h-[56px] min-w-[56px] px-3.5 bg-white/95 hover:bg-rose-50 active:scale-95 text-slate-800 font-bold rounded-2xl shadow-md border-2 border-slate-200 flex items-center justify-center gap-1.5 transition">
+        <span class="text-xl">🔄</span>
+        <span class="hidden lg:inline text-sm">重來</span>
+      </button>
+    </div>
+
+    <!-- 3D 畫面底部操作提示條（直接點擊工具提示或第六關向上滑動引導） -->
+    <div id="canvas-guide-overlay" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none flex flex-col items-center gap-2 w-[90%] max-w-md">
+      <!-- 第六關專屬：向上滑動手勢引導與拔出進度條 -->
+      <div id="swipe-guide-box" class="hidden bg-white/95 backdrop-blur-md px-5 py-3.5 rounded-3xl shadow-xl border-4 border-amber-400 flex flex-col items-center w-full">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-12 rounded-2xl bg-amber-100 flex items-center justify-center overflow-hidden">
+            <span class="text-2xl font-black text-amber-600 swipe-arrow-anim">⬆️</span>
+          </div>
+          <div>
+            <p class="text-base md:text-lg font-black text-slate-900">壓住白蘿蔔往上滑！</p>
+            <p class="text-xs md:text-sm font-bold text-slate-600">也可以點右邊「用力往上拔」按鈕</p>
+          </div>
+        </div>
+        <!-- 拔蘿蔔力道進度條 -->
+        <div class="w-full h-4 bg-slate-200 rounded-full overflow-hidden mt-2.5 border border-slate-300">
+          <div id="pull-progress-bar" class="h-full w-0 bg-gradient-to-r from-emerald-500 to-amber-500 transition-all duration-75 rounded-full"></div>
+        </div>
+      </div>
+
+      <!-- 第 1~5 關互動提示氣泡 -->
+      <div id="tap-3d-hint" class="bg-white/90 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-md border border-emerald-200 text-center">
+        <p id="tap-3d-hint-text" class="text-xs md:text-sm font-bold text-emerald-900">💡 點擊右方按鈕，或直接點擊發光的 3D 工具</p>
+      </div>
+    </div>
+
+    <!-- 温和回饋訊息氣泡（練習模式選錯或提示時顯示，絕不使用 alert） -->
+    <div id="feedback-toast" class="hidden absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-amber-500 text-white px-6 py-3 rounded-2xl shadow-xl border-2 border-white font-black text-base md:text-lg tracking-wide transition-all">
+      再試試看喔！先看看這一步需要哪一個工具
+    </div>
+  </main>
+
+  <!-- 右側 20%：工作分析任務引導面板 -->
+  <aside class="w-full h-[35%] md:w-[20%] md:h-full bg-white border-t-4 md:border-t-0 md:border-l-4 border-emerald-200 flex flex-col justify-between p-3 md:p-3.5 z-20 shadow-xl overflow-y-auto no-scrollbar">
+
+    <!-- 頂部：6 關工作分析進度條 -->
+    <div>
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-xs font-black text-emerald-800 tracking-wider">種植步驟進度</span>
+        <span id="step-counter-text" class="text-xs font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-lg">1 / 6</span>
+      </div>
+      <!-- 6 格圓角進度指示器 -->
+      <div id="progress-steps" class="grid grid-cols-6 gap-1.5 mb-2.5">
+        <div data-step="1" class="h-2.5 rounded-full bg-amber-400 transition-all"></div>
+        <div data-step="2" class="h-2.5 rounded-full bg-slate-200 transition-all"></div>
+        <div data-step="3" class="h-2.5 rounded-full bg-slate-200 transition-all"></div>
+        <div data-step="4" class="h-2.5 rounded-full bg-slate-200 transition-all"></div>
+        <div data-step="5" class="h-2.5 rounded-full bg-slate-200 transition-all"></div>
+        <div data-step="6" class="h-2.5 rounded-full bg-slate-200 transition-all"></div>
+      </div>
+
+      <!-- 目前關卡任務卡片 -->
+      <div class="bg-emerald-50/90 border-2 border-emerald-200 rounded-2xl p-2.5 md:p-3 mb-2">
+        <div class="flex items-center justify-between gap-1 mb-1">
+          <span id="panel-stage-title" class="text-base md:text-lg font-black text-emerald-950 leading-snug">第 1 關：裝培養土</span>
+        </div>
+        <p id="panel-stage-desc" class="text-xs md:text-sm font-bold text-slate-700 leading-relaxed">
+          把培養土倒進半透明花盆裡，幫白蘿蔔準備舒服的家。
+        </p>
+
+        <!-- 鷹架策略提示框（學習模式常駐顯示；練習模式答錯後顯示） -->
+        <div id="scaffold-hint-box" class="mt-2 bg-amber-50 border border-amber-300 rounded-xl p-2 flex items-start gap-1.5">
+          <span class="text-sm leading-none mt-0.5">🌟</span>
+          <p id="scaffold-hint-text" class="text-xs font-bold text-amber-900 leading-snug">
+            提示：請按下方「倒培養土」按鈕。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 中間：動態操作按鈕區（依關卡與學習/練習模式切換） -->
+    <div id="action-buttons-container" class="flex flex-col gap-2 my-auto">
+      <!-- 由 JavaScript 動態產生高對比大按鈕（min-h-[56px]） -->
+    </div>
+
+    <!-- 底部：語音重聽大按鈕 -->
+    <div class="pt-2 border-t border-slate-100">
+      <button id="btn-replay-tts" type="button"
+        class="w-full min-h-[56px] bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-black text-sm md:text-base rounded-2xl shadow-md flex items-center justify-center gap-2 transition">
+        <span class="text-xl">🔊</span>
+        <span>重聽題目</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- 老師設定抽屜視窗（Modal） -->
+  <div id="teacher-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl border-4 border-amber-300 p-6 flex flex-col gap-5">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">⚙️</span>
+          <h2 class="text-xl font-black text-slate-900">老師教學設定</h2>
+        </div>
+        <button id="btn-close-settings" type="button"
+          class="min-h-[48px] min-w-[48px] rounded-2xl bg-slate-100 hover:bg-slate-200 font-black text-slate-700 flex items-center justify-center">
+          ✕
+        </button>
+      </div>
+
+      <!-- 差異化教學模式選擇 -->
+      <div class="flex flex-col gap-3">
+        <p class="text-sm font-black text-slate-700">選擇鷹架提示程度：</p>
+
+        <button id="select-learning-mode" type="button"
+          class="w-full min-h-[68px] p-4 rounded-2xl border-3 border-emerald-600 bg-emerald-50 text-left flex items-start gap-3 transition">
+          <span class="text-2xl mt-0.5">💡</span>
+          <div>
+            <div class="font-black text-base text-emerald-950">學習模式（預設）</div>
+            <div class="text-xs font-bold text-emerald-800 mt-0.5">只顯示正確步驟按鈕，並有閃爍光暈與文字提示引導。</div>
+          </div>
+        </button>
+
+        <button id="select-practice-mode" type="button"
+          class="w-full min-h-[68px] p-4 rounded-2xl border-2 border-slate-200 bg-white hover:bg-amber-50 text-left flex items-start gap-3 transition">
+          <span class="text-2xl mt-0.5">🎯</span>
+          <div>
+            <div class="font-black text-base text-slate-900">練習模式（獨立操作）</div>
+            <div class="text-xs font-bold text-slate-600 mt-0.5">隱藏光暈提示，並列多個工具選項讓學生自行判斷；選錯時會溫和引導。</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- 語音與剖面說明 -->
+      <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-200 text-xs font-bold text-slate-600 leading-relaxed">
+        盆器已設定為「半透明剖面視角」，學生可清楚觀察土壤深度、種子位置與白蘿蔔從土壤交界處冒出的過程。
+      </div>
+
+      <button id="btn-save-settings" type="button"
+        class="w-full min-h-[56px] bg-emerald-600 hover:bg-emerald-700 text-white font-black text-base rounded-2xl shadow-md transition">
+        完成設定
+      </button>
+    </div>
+  </div>
+
+  <!-- 第六關完成：慶祝畫面與「再種一盆」按鈕 -->
+  <div id="celebration-modal" class="hidden fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl border-4 border-amber-400 p-6 md:p-8 text-center flex flex-col items-center gap-4">
+      <div class="flex items-center justify-center gap-2 text-4xl md:text-5xl">
+        <span class="star-pop" style="animation-delay: 0.05s;">⭐</span>
+        <span class="star-pop text-5xl md:text-6xl" style="animation-delay: 0.18s;">🌟</span>
+        <span class="star-pop" style="animation-delay: 0.3s;">⭐</span>
+      </div>
+
+      <div class="w-24 h-24 rounded-full bg-emerald-100 border-4 border-emerald-400 flex items-center justify-center text-5xl shadow-inner">
+        🥬
+      </div>
+
+      <div>
+        <h2 class="text-2xl md:text-3xl font-black text-emerald-900">太棒了！白蘿蔔大豐收！</h2>
+        <p class="text-sm md:text-base font-bold text-slate-600 mt-2 leading-relaxed">
+          你成功完成了裝土、挖洞、播種、覆土、澆水，還把又白又胖的蘿蔔拔出來了！
+        </p>
+      </div>
+
+      <button id="btn-plant-again" type="button"
+        class="w-full min-h-[64px] mt-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 text-white font-black text-xl rounded-2xl shadow-lg flex items-center justify-center gap-2.5 transition">
+        <span class="text-2xl">🌱</span>
+        <span>再種一盆</span>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * 白蘿蔔種植模擬器 (3D 食農教育互動教具)
+     * 設計重點：
+     * 1. 左側 80% Three.js 半透明剖面花盆 + 右側 20% 工作分析導引面板
+     * 2. Web Speech API (zh-TW) 自動語音朗讀 + Web Audio API 合成正向音效
+     * 3. 嚴格防連點機制 (Debounce 400ms + 動畫鎖定) 避免特教學生誤觸跳關
+     * 4. 第六關支援觸控/滑鼠在 3D 白蘿蔔上往上滑動拔出，亦提供右面板大按鈕輔助
+     */
+
+    // ==========================================
+    // 1. 關卡資料與工作分析 (Task Analysis) 定義
+    // ==========================================
+    const STAGES = [
+      {
+        id: 1,
+        toolKey: 'soilBag',
+        title: '第 1 關：裝培養土',
+        shortBanner: '將培養土裝到花盆裡',
+        desc: '花盆現在是空的，請把鬆軟的培養土倒進花盆裡。',
+        hint: '請點擊「倒培養土」按鈕，或直接點桌上的培養土袋。',
+        tts: '第一關，請將培養土裝到花盆裡。',
+        btnLabel: '倒培養土',
+        btnIcon: '🪴',
+        camPos: { x: 0, y: 4.6, z: 8.6 },
+        camTarget: { x: 0, y: 1.5, z: 0 }
+      },
+      {
+        id: 2,
+        toolKey: 'trowel',
+        title: '第 2 關：土挖小洞',
+        shortBanner: '在花盆的土中間挖小洞',
+        desc: '用小鏟子在培養土的正中央挖一個小洞，準備放種子。',
+        hint: '請點擊「挖小洞」按鈕，或點桌上的藍色小鏟子。',
+        tts: '第二關，請在花盆的土中間挖一個小洞。',
+        btnLabel: '挖小洞',
+        btnIcon: '⛏️',
+        camPos: { x: 0, y: 4.9, z: 7.8 },
+        camTarget: { x: 0, y: 1.8, z: 0 }
+      },
+      {
+        id: 3,
+        toolKey: 'seedPacket',
+        title: '第 3 關：放種子',
+        shortBanner: '將白蘿蔔種子放到洞裡',
+        desc: '把白蘿蔔種子放進剛剛挖好的小洞裡面。',
+        hint: '請點擊「放種子」按鈕，或點桌上的白蘿蔔種子包。',
+        tts: '第三關，請將白蘿蔔種子放到洞裡。',
+        btnLabel: '放種子',
+        btnIcon: '🌰',
+        camPos: { x: 0, y: 4.5, z: 7.4 },
+        camTarget: { x: 0, y: 1.7, z: 0 }
+      },
+      {
+        id: 4,
+        toolKey: 'trowelCover',
+        title: '第 4 關：覆土',
+        shortBanner: '把旁邊的土蓋在種子上',
+        desc: '用小鏟子把旁邊的培養土輕輕蓋住種子，幫種子蓋被子。',
+        hint: '請點擊「蓋上培養土」按鈕，把小洞填平。',
+        tts: '第四關，請覆土，把旁邊的土輕輕蓋在種子上。',
+        btnLabel: '蓋上培養土',
+        btnIcon: '🤎',
+        camPos: { x: 0, y: 4.6, z: 7.8 },
+        camTarget: { x: 0, y: 1.8, z: 0 }
+      },
+      {
+        id: 5,
+        toolKey: 'wateringCan',
+        title: '第 5 關：澆水與生長',
+        shortBanner: '幫種子澆水，看蘿蔔長大',
+        desc: '幫花盆澆水！喝飽水之後，葉子會長出來，白蘿蔔也會從土壤交界處冒出來喔！',
+        hint: '請點擊「澆水」按鈕，或點桌上的紅色澆水壺。',
+        tts: '第五關，請幫花盆澆水，看看葉子和白蘿蔔長出來。',
+        btnLabel: '澆水',
+        btnIcon: '🚿',
+        camPos: { x: 0.4, y: 4.4, z: 8.4 },
+        camTarget: { x: 0, y: 2.1, z: 0 }
+      },
+      {
+        id: 6,
+        toolKey: 'radish',
+        title: '第 6 關：拔白蘿蔔',
+        shortBanner: '將白蘿蔔往上滑拔出來',
+        desc: '白蘿蔔長大了！請壓住白蘿蔔往上滑動，把白蘿蔔拔出來！',
+        hint: '手指壓住畫面中的白蘿蔔往上滑，或按下方「用力往上拔」。',
+        tts: '第六關，白蘿蔔長大了！請將白蘿蔔往上滑，把蘿蔔拔出來。',
+        btnLabel: '用力往上拔',
+        btnIcon: '⬆️',
+        camPos: { x: 0, y: 4.8, z: 8.8 },
+        camTarget: { x: 0, y: 2.5, z: 0 }
+      }
+    ];
+
+    // 練習模式干擾選項池
+    const TOOL_OPTIONS = [
+      { key: 'soilBag', label: '倒培養土', icon: '🪴' },
+      { key: 'trowel', label: '挖小洞', icon: '⛏️' },
+      { key: 'seedPacket', label: '放種子', icon: '🌰' },
+      { key: 'trowelCover', label: '蓋上培養土', icon: '🤎' },
+      { key: 'wateringCan', label: '澆水', icon: '🚿' }
+    ];
+
+    // ==========================================
+    // 2. 全域狀態與防呆控制
+    // ==========================================
+    const appState = {
+      currentStage: 1,        // 1 ~ 6
+      mode: 'learning',       // 'learning' | 'practice'
+      isMuted: false,
+      isAnimating: false,     // 動畫執行中鎖定
+      lastActionTime: 0,      // 防連點時間戳記 (400ms Debounce)
+      pullProgress: 0,        // 第六關拔蘿蔔進度 (0 ~ 1)
+      isDraggingRadish: false,
+      dragStartY: 0,
+      hasRevealedHintInPractice: false
+    };
+
+    // ==========================================
+    // 3. 音效與台灣國語語音引擎 (無外部音檔依賴)
+    // ==========================================
+    let audioCtx = null;
+
+    function ensureAudioContext() {
+      if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtx = new AudioContextClass();
+        }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+    }
+
+    function playSoundEffect(type) {
+      if (appState.isMuted) return;
+      ensureAudioContext();
+      if (!audioCtx) return;
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'click') {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(680, now + 0.09);
+        gain.gain.setValueAtTime(0.16, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.11);
+      } else if (type === 'soil' || type === 'dig') {
+        // 柔和沙沙聲（濾波白噪音）
+        const bufferSize = audioCtx.sampleRate * 0.45;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.5));
+        }
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(type === 'dig' ? 650 : 480, now);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+        noise.start(now);
+      } else if (type === 'water') {
+        // 清脆水滴三連音
+        [587.33, 659.25, 783.99, 880].forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          const t = now + idx * 0.11;
+          osc.frequency.setValueAtTime(freq, t);
+          osc.frequency.exponentialRampToValueAtTime(freq * 1.25, t + 0.12);
+          gain.gain.setValueAtTime(0.14, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(t);
+          osc.stop(t + 0.16);
+        });
+      } else if (type === 'growth') {
+        // 生長魔法琶音
+        const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+        notes.forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'triangle';
+          const t = now + idx * 0.14;
+          osc.frequency.setValueAtTime(freq, t);
+          gain.gain.setValueAtTime(0.18, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(t);
+          osc.stop(t + 0.42);
+        });
+      } else if (type === 'retry') {
+        // 溫和提示音（絕不用刺耳蜂鳴）
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.setValueAtTime(392, now + 0.14);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      } else if (type === 'celebrate') {
+        // 豐收歡慶號角
+        const melody = [
+          { f: 523.25, t: 0.0, d: 0.15 },
+          { f: 659.25, t: 0.15, d: 0.15 },
+          { f: 783.99, t: 0.30, d: 0.15 },
+          { f: 1046.50, t: 0.45, d: 0.55 }
+        ];
+        melody.forEach(n => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(n.f, now + n.t);
+          gain.gain.setValueAtTime(0.22, now + n.t);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + n.t + n.d);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now + n.t);
+          osc.stop(now + n.t + n.d + 0.05);
+        });
+      }
+    }
+
+    function speakText(text) {
+      if (appState.isMuted) return;
+      if (!('speechSynthesis' in window)) return;
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = 'zh-TW';
+        utter.rate = 0.92;  // 稍微放慢語速，適合特教學生聆聽
+        utter.pitch = 1.08;
+        window.speechSynthesis.speak(utter);
+      } catch (e) {
+        // 忽略瀏覽器語音限制錯誤
+      }
+    }
+
+    // ==========================================
+    // 4. Three.js 3D 半透明剖面場景建構
+    // ==========================================
+    const viewportEl = document.getElementById('viewport-container');
+    const canvasEl = document.getElementById('three-canvas');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xe6f7ee);
+    scene.fog = new THREE.Fog(0xe6f7ee, 18, 36);
+
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    camera.position.set(0, 4.6, 8.6);
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas: canvasEl,
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // 燈光設計：明亮溫暖的食農教室陽光感
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xd1fae5, 0.85);
+    hemiLight.position.set(0, 12, 0);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfffbeb, 0.95);
+    dirLight.position.set(6, 11, 7);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.camera.near = 1;
+    dirLight.shadow.camera.far = 25;
+    const d = 6;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    scene.add(dirLight);
+
+    // 溫室木桌檯面
+    const tableGeo = new THREE.CylinderGeometry(8.5, 8.5, 0.5, 48);
+    const tableMat = new THREE.MeshStandardMaterial({
+      color: 0xe7c697,
+      roughness: 0.75,
+      metalness: 0.05
+    });
+    const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+    tableMesh.position.y = -0.25;
+    tableMesh.receiveShadow = true;
+    scene.add(tableMesh);
+
+    // 桌面綠色農藝操作墊
+    const matGeo = new THREE.CylinderGeometry(4.6, 4.6, 0.04, 48);
+    const matMaterial = new THREE.MeshStandardMaterial({
+      color: 0xa7f3d0,
+      roughness: 0.85
+    });
+    const workMat = new THREE.Mesh(matGeo, matMaterial);
+    workMat.position.y = 0.02;
+    workMat.receiveShadow = true;
+    scene.add(workMat);
+
+    // ==========================================
+    // 5. 半透明剖面花盆與多層次土壤系統
+    // ==========================================
+    const potGroup = new THREE.Group();
+    scene.add(potGroup);
+
+    const POT_HEIGHT = 2.6;
+    const POT_TOP_R = 1.75;
+    const POT_BOT_R = 1.35;
+
+    // 外層半透明剖面盆壁（正面開啟約 135 度剖面窗口，其餘為半透明壓克力質感）
+    // Three.js CylinderGeometry thetaStart=0 在 +Z 方向，我們讓開口朝向正面 (+Z)
+    const OPEN_ANGLE = Math.PI * 0.72; // 正面剖面視角張角
+    const POT_ARC = Math.PI * 2 - OPEN_ANGLE;
+    const POT_START = OPEN_ANGLE * 0.5;
+
+    const potWallGeo = new THREE.CylinderGeometry(
+      POT_TOP_R, POT_BOT_R, POT_HEIGHT, 40, 1, true, POT_START, POT_ARC
+    );
+    const potWallMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.42,
+      roughness: 0.15,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const potWall = new THREE.Mesh(potWallGeo, potWallMat);
+    potWall.position.y = POT_HEIGHT / 2 + 0.04;
+    potGroup.add(potWall);
+
+    // 花盆底部圓盤
+    const potBaseGeo = new THREE.CylinderGeometry(POT_BOT_R, POT_BOT_R * 0.95, 0.14, 40);
+    const potBaseMat = new THREE.MeshStandardMaterial({
+      color: 0xd97706,
+      roughness: 0.5
+    });
+    const potBase = new THREE.Mesh(potBaseGeo, potBaseMat);
+    potBase.position.y = 0.07;
+    potBase.receiveShadow = true;
+    potGroup.add(potBase);
+
+    // 花盆上緣半透明厚框（強化立體輪廓）
+    const rimGeo = new THREE.TorusGeometry(POT_TOP_R, 0.065, 12, 40, POT_ARC);
+    const rimMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      transparent: true,
+      opacity: 0.75,
+      roughness: 0.3
+    });
+    const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+    rimMesh.rotation.x = Math.PI / 2;
+    rimMesh.rotation.z = Math.PI / 2 - POT_START;
+    rimMesh.position.y = POT_HEIGHT + 0.04;
+    potGroup.add(rimMesh);
+
+    // 土壤系統容器（支援剖面看穿小洞、種子與白蘿蔔根部）
+    const soilGroup = new THREE.Group();
+    soilGroup.position.y = 0.14;
+    potGroup.add(soilGroup);
+
+    const soilColorDry = new THREE.Color(0x784b2a);
+    const soilColorWet = new THREE.Color(0x4a2c16);
+
+    const soilMat = new THREE.MeshStandardMaterial({
+      color: soilColorDry.clone(),
+      roughness: 0.92,
+      metalness: 0.02,
+      side: THREE.DoubleSide
+    });
+
+    // 主土壤體（LatheGeometry 旋轉體，正面保留剖面切口，讓學生能直接透視中央小洞與蘿蔔！）
+    function createSoilProfileGeometry(hasHole, isCovered) {
+      const points = [];
+      const maxH = 2.15;
+      const rBot = POT_BOT_R - 0.06;
+      const rTop = POT_TOP_R - 0.08;
+
+      if (!hasHole || isCovered) {
+        // 平整的土壤剖面
+        points.push(new THREE.Vector2(0.001, 0));
+        points.push(new THREE.Vector2(rBot, 0));
+        points.push(new THREE.Vector2(rTop, maxH));
+        points.push(new THREE.Vector2(0.001, maxH));
+      } else {
+        // 第二、三關：土壤正中央有明顯的 V/U 型小洞！
+        const holeDepth = 0.85;
+        const holeRadius = 0.42;
+        points.push(new THREE.Vector2(0.001, 0));
+        points.push(new THREE.Vector2(rBot, 0));
+        points.push(new THREE.Vector2(rTop, maxH));
+        points.push(new THREE.Vector2(holeRadius, maxH));
+        points.push(new THREE.Vector2(holeRadius * 0.55, maxH - holeDepth));
+        points.push(new THREE.Vector2(0.001, maxH - holeDepth));
+      }
+
+      const geo = new THREE.LatheGeometry(points, 36, POT_START, POT_ARC);
+      geo.computeVertexNormals();
+      return geo;
+    }
+
+    const soilMesh = new THREE.Mesh(createSoilProfileGeometry(false, false), soilMat);
+    soilMesh.scale.set(1, 0.001, 1); // 初始高度幾乎為 0（空花盆）
+    soilMesh.visible = false;
+    soilMesh.castShadow = true;
+    soilMesh.receiveShadow = true;
+    soilGroup.add(soilMesh);
+
+    // 剖面切口兩側的平坦土壤斷面擋板（讓剖面看起來像真實切開的土層）
+    const cutPlaneGeo = new THREE.PlaneGeometry(POT_TOP_R - 0.08, 2.15);
+    const cutLeft = new THREE.Mesh(cutPlaneGeo, soilMat);
+    cutLeft.position.set(
+      Math.sin(POT_START) * (POT_TOP_R * 0.48),
+      2.15 / 2,
+      Math.cos(POT_START) * (POT_TOP_R * 0.48)
+    );
+    cutLeft.rotation.y = POT_START - Math.PI / 2;
+    soilMesh.add(cutLeft);
+
+    const cutRight = new THREE.Mesh(cutPlaneGeo, soilMat);
+    const endAngle = POT_START + POT_ARC;
+    cutRight.position.set(
+      Math.sin(endAngle) * (POT_TOP_R * 0.48),
+      2.15 / 2,
+      Math.cos(endAngle) * (POT_TOP_R * 0.48)
+    );
+    cutRight.rotation.y = endAngle + Math.PI / 2;
+    soilMesh.add(cutRight);
+
+    // ==========================================
+    // 6. 種子與白蘿蔔 3D 模型（含土壤交界處冒出設計）
+    // ==========================================
+    const seedsGroup = new THREE.Group();
+    seedsGroup.visible = false;
+    soilGroup.add(seedsGroup);
+
+    const seedGeo = new THREE.SphereGeometry(0.085, 16, 16);
+    seedGeo.scale(1.2, 0.85, 1.0);
+    const seedMat = new THREE.MeshStandardMaterial({
+      color: 0xd97706,
+      roughness: 0.4
+    });
+
+    const seedPositions = [
+      { x: 0, y: 1.42, z: 0.05 },
+      { x: -0.11, y: 1.44, z: 0.12 },
+      { x: 0.11, y: 1.43, z: 0.10 }
+    ];
+    seedPositions.forEach(pos => {
+      const s = new THREE.Mesh(seedGeo, seedMat);
+      s.position.set(pos.x, pos.y, pos.z);
+      seedsGroup.add(s);
+    });
+
+    // 白蘿蔔完整 3D 模型（白色胖根部 + 翠綠羽狀葉片）
+    const radishGroup = new THREE.Group();
+    radishGroup.visible = false;
+    // 土壤表面 y = 2.15（在 soilGroup 座標系內）
+    // 當白蘿蔔長大時，根部頂端（白色肩膀）會高出土壤表面約 0.65 單位，清楚呈現從土壤交界處冒出！
+    const RADISH_GROWN_Y = 1.95;
+    radishGroup.position.set(0, RADISH_GROWN_Y, 0.05);
+    radishGroup.scale.set(0.01, 0.01, 0.01);
+    soilGroup.add(radishGroup);
+
+    // 白蘿蔔根部（LatheGeometry 打造圓潤白胖、下端微尖的經典白蘿蔔造型）
+    const radishPoints = [
+      new THREE.Vector2(0.001, -1.25), // 根尖
+      new THREE.Vector2(0.08, -1.05),
+      new THREE.Vector2(0.24, -0.75),
+      new THREE.Vector2(0.40, -0.35),
+      new THREE.Vector2(0.48, 0.10),
+      new THREE.Vector2(0.49, 0.48),  // 土壤交界處附近的圓潤肩膀
+      new THREE.Vector2(0.42, 0.72),  // 冒出土壤的白蘿蔔頭
+      new THREE.Vector2(0.22, 0.84),
+      new THREE.Vector2(0.001, 0.86)
+    ];
+    const radishBodyGeo = new THREE.LatheGeometry(radishPoints, 32);
+    const radishBodyMat = new THREE.MeshStandardMaterial({
+      color: 0xfefefe,
+      roughness: 0.35,
+      metalness: 0.02
+    });
+    const radishBody = new THREE.Mesh(radishBodyGeo, radishBodyMat);
+    radishBody.castShadow = true;
+    radishGroup.add(radishBody);
+
+    // 白蘿蔔肩部淡綠色光澤環（擬真細節）
+    const shoulderGeo = new THREE.CylinderGeometry(0.43, 0.48, 0.22, 32, 1, true);
+    const shoulderMat = new THREE.MeshStandardMaterial({
+      color: 0xdcfce7,
+      roughness: 0.4,
+      side: THREE.DoubleSide
+    });
+    const shoulderMesh = new THREE.Mesh(shoulderGeo, shoulderMat);
+    shoulderMesh.position.y = 0.62;
+    radishGroup.add(shoulderMesh);
+
+    // 細鬚根裝飾
+    const rootTailGeo = new THREE.ConeGeometry(0.025, 0.35, 8);
+    const rootTail = new THREE.Mesh(rootTailGeo, radishBodyMat);
+    rootTail.rotation.x = Math.PI;
+    rootTail.position.y = -1.38;
+    radishGroup.add(rootTail);
+
+    // 翠綠蘿蔔葉叢（6 片立體弧形葉片）
+    const leavesGroup = new THREE.Group();
+    leavesGroup.position.y = 0.82;
+    radishGroup.add(leavesGroup);
+
+    const leafMat = new THREE.MeshStandardMaterial({
+      color: 0x16a34a,
+      roughness: 0.55,
+      side: THREE.DoubleSide
+    });
+
+    for (let i = 0; i < 6; i++) {
+      const leafPivot = new THREE.Group();
+      leafPivot.rotation.y = (i / 6) * Math.PI * 2;
+      leafPivot.rotation.z = 0.28 + (i % 2) * 0.14;
+
+      const stemGeo = new THREE.CylinderGeometry(0.03, 0.045, 0.95, 8);
+      const stem = new THREE.Mesh(stemGeo, leafMat);
+      stem.position.y = 0.45;
+      leafPivot.add(stem);
+
+      const bladeGeo = new THREE.SphereGeometry(0.24, 12, 12);
+      bladeGeo.scale(0.65, 1.8, 0.18);
+      const blade = new THREE.Mesh(bladeGeo, leafMat);
+      blade.position.set(0, 0.85, 0.04);
+      blade.castShadow = true;
+      leafPivot.add(blade);
+
+      leavesGroup.add(leafPivot);
+    }
+
+    // 透明碰撞感應圓柱（加大第六關手指滑動觸控熱區，讓特教學生更容易滑到！）
+    const radishHitGeo = new THREE.CylinderGeometry(0.95, 0.95, 2.8, 16);
+    const radishHitMat = new THREE.MeshBasicMaterial({ visible: false });
+    const radishHitBox = new THREE.Mesh(radishHitGeo, radishHitMat);
+    radishHitBox.position.y = 0.5;
+    radishHitBox.userData = { interactKey: 'radish' };
+    radishGroup.add(radishHitBox);
+
+    // ==========================================
+    // 7. 桌面 3D 互動工具（培養土袋、小鏟子、種子包、澆水壺）
+    // ==========================================
+    const interactiveObjects = []; // 供 Raycaster 點擊偵測
+    const tools = {};
+
+    // (A) 培養土袋（左側後方）
+    const soilBagGroup = new THREE.Group();
+    soilBagGroup.position.set(-2.6, 0.65, -0.5);
+    soilBagGroup.rotation.y = 0.35;
+    scene.add(soilBagGroup);
+
+    const bagGeo = new THREE.BoxGeometry(1.1, 1.3, 0.55);
+    const bagMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.7 });
+    const bagMesh = new THREE.Mesh(bagGeo, bagMat);
+    bagMesh.castShadow = true;
+    bagMesh.userData = { interactKey: 'soilBag' };
+    soilBagGroup.add(bagMesh);
+
+    const bagLabelGeo = new THREE.PlaneGeometry(0.85, 0.65);
+    const bagLabelMat = new THREE.MeshBasicMaterial({ color: 0xfef3c7 });
+    const bagLabel = new THREE.Mesh(bagLabelGeo, bagLabelMat);
+    bagLabel.position.z = 0.28;
+    bagLabel.userData = { interactKey: 'soilBag' };
+    soilBagGroup.add(bagLabel);
+
+    tools.soilBag = {
+      group: soilBagGroup,
+      homePos: soilBagGroup.position.clone(),
+      homeRot: soilBagGroup.rotation.clone(),
+      meshes: [bagMesh, bagLabel]
+    };
+    interactiveObjects.push(bagMesh, bagLabel);
+
+    // (B) 園藝小鏟子（左前方）
+    const trowelGroup = new THREE.Group();
+    trowelGroup.position.set(-2.3, 0.22, 1.35);
+    trowelGroup.rotation.set(0.15, 0.5, -0.2);
+    scene.add(trowelGroup);
+
+    const handleGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.75, 12);
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4 });
+    const handleMesh = new THREE.Mesh(handleGeo, handleMat);
+    handleMesh.position.y = 0.35;
+    handleMesh.userData = { interactKey: 'trowel' };
+    trowelGroup.add(handleMesh);
+
+    const scoopGeo = new THREE.CylinderGeometry(0.22, 0.14, 0.65, 12, 1, false, 0, Math.PI);
+    const scoopMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.6, roughness: 0.3, side: THREE.DoubleSide });
+    const scoopMesh = new THREE.Mesh(scoopGeo, scoopMat);
+    scoopMesh.position.y = -0.25;
+    scoopMesh.userData = { interactKey: 'trowel' };
+    trowelGroup.add(scoopMesh);
+
+    tools.trowel = {
+      group: trowelGroup,
+      homePos: trowelGroup.position.clone(),
+      homeRot: trowelGroup.rotation.clone(),
+      meshes: [handleMesh, scoopMesh]
+    };
+    interactiveObjects.push(handleMesh, scoopMesh);
+
+    // (C) 白蘿蔔種子包（右前方）
+    const seedPackGroup = new THREE.Group();
+    seedPackGroup.position.set(2.3, 0.42, 1.3);
+    seedPackGroup.rotation.set(-0.25, -0.45, 0);
+    scene.add(seedPackGroup);
+
+    const packGeo = new THREE.BoxGeometry(0.75, 0.95, 0.12);
+    const packMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.45 });
+    const packMesh = new THREE.Mesh(packGeo, packMat);
+    packMesh.castShadow = true;
+    packMesh.userData = { interactKey: 'seedPacket' };
+    seedPackGroup.add(packMesh);
+
+    const packBadgeGeo = new THREE.CircleGeometry(0.24, 20);
+    const packBadgeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const packBadge = new THREE.Mesh(packBadgeGeo, packBadgeMat);
+    packBadge.position.z = 0.065;
+    packBadge.userData = { interactKey: 'seedPacket' };
+    seedPackGroup.add(packBadge);
+
+    tools.seedPacket = {
+      group: seedPackGroup,
+      homePos: seedPackGroup.position.clone(),
+      homeRot: seedPackGroup.rotation.clone(),
+      meshes: [packMesh, packBadge]
+    };
+    interactiveObjects.push(packMesh, packBadge);
+
+    // (D) 紅色澆水壺（右後方）
+    const canGroup = new THREE.Group();
+    canGroup.position.set(2.65, 0.6, -0.5);
+    canGroup.rotation.y = -0.55;
+    scene.add(canGroup);
+
+    const canBodyGeo = new THREE.CylinderGeometry(0.45, 0.55, 1.05, 20);
+    const canMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.35 });
+    const canBody = new THREE.Mesh(canBodyGeo, canMat);
+    canBody.castShadow = true;
+    canBody.userData = { interactKey: 'wateringCan' };
+    canGroup.add(canBody);
+
+    const spoutGeo = new THREE.CylinderGeometry(0.06, 0.12, 0.95, 12);
+    const spoutMesh = new THREE.Mesh(spoutGeo, canMat);
+    spoutMesh.position.set(-0.55, 0.25, 0);
+    spoutMesh.rotation.z = 0.78;
+    spoutMesh.userData = { interactKey: 'wateringCan' };
+    canGroup.add(spoutMesh);
+
+    const roseGeo = new THREE.CylinderGeometry(0.16, 0.08, 0.14, 16);
+    const roseMat = new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.4 });
+    const roseMesh = new THREE.Mesh(roseGeo, roseMat);
+    roseMesh.position.set(-0.92, 0.58, 0);
+    roseMesh.rotation.z = 0.78;
+    roseMesh.userData = { interactKey: 'wateringCan' };
+    canGroup.add(roseMesh);
+
+    tools.wateringCan = {
+      group: canGroup,
+      homePos: canGroup.position.clone(),
+      homeRot: canGroup.rotation.clone(),
+      meshes: [canBody, spoutMesh, roseMesh]
+    };
+    interactiveObjects.push(canBody, spoutMesh, roseMesh);
+    interactiveObjects.push(radishHitBox);
+
+    // 粒子系統（澆水水滴 / 拔蘿蔔泥土碎屑）
+    const particlesGroup = new THREE.Group();
+    scene.add(particlesGroup);
+
+    function spawnParticles(type, originPos) {
+      const count = type === 'water' ? 28 : 22;
+      const geo = new THREE.SphereGeometry(type === 'water' ? 0.055 : 0.07, 8, 8);
+      const mat = new THREE.MeshBasicMaterial({
+        color: type === 'water' ? 0x38bdf8 : 0x784b2a
+      });
+
+      const items = [];
+      for (let i = 0; i < count; i++) {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(
+          originPos.x + (Math.random() - 0.5) * 0.8,
+          originPos.y + Math.random() * 0.5,
+          originPos.z + (Math.random() - 0.5) * 0.8
+        );
+        m.userData = {
+          vx: (Math.random() - 0.5) * (type === 'water' ? 0.02 : 0.08),
+          vy: type === 'water' ? (-0.06 - Math.random() * 0.05) : (0.06 + Math.random() * 0.08),
+          vz: (Math.random() - 0.5) * (type === 'water' ? 0.02 : 0.08),
+          life: 1.0
+        };
+        particlesGroup.add(m);
+        items.push(m);
+      }
+
+      const startTime = performance.now();
+      function updateParticles(now) {
+        const elapsed = (now - startTime) / 1000;
+        if (elapsed > 1.1) {
+          items.forEach(m => particlesGroup.remove(m));
+          return;
+        }
+        items.forEach(m => {
+          m.position.x += m.userData.vx;
+          m.position.y += m.userData.vy;
+          m.position.z += m.userData.vz;
+          if (type === 'soil') {
+            m.userData.vy -= 0.004; // 重力
+          }
+          m.scale.setScalar(Math.max(0.01, 1 - elapsed));
+        });
+        requestAnimationFrame(updateParticles);
+      }
+      requestAnimationFrame(updateParticles);
+    }
+
+    // ==========================================
+    // 8. 平滑動畫工具函式
+    // ==========================================
+    function animateTween(durationMs, onUpdate, onComplete) {
+      const start = performance.now();
+      function step(now) {
+        const rawT = Math.min(1, (now - start) / durationMs);
+        // easeInOutCubic
+        const t = rawT < 0.5
+          ? 4 * rawT * rawT * rawT
+          : 1 - Math.pow(-2 * rawT + 2, 3) / 2;
+        onUpdate(t, rawT);
+        if (rawT < 1) {
+          requestAnimationFrame(step);
+        } else if (onComplete) {
+          onComplete();
+        }
+      }
+      requestAnimationFrame(step);
+    }
+
+    // 相機平滑轉場目標
+    const camGoalPos = new THREE.Vector3(0, 4.6, 8.6);
+    const camGoalTarget = new THREE.Vector3(0, 1.5, 0);
+    const camCurrentTarget = new THREE.Vector3(0, 1.5, 0);
+
+    function setCameraFocusForStage(stageId) {
+      const cfg = STAGES[stageId - 1];
+      if (!cfg) return;
+      camGoalPos.set(cfg.camPos.x, cfg.camPos.y, cfg.camPos.z);
+      camGoalTarget.set(cfg.camTarget.x, cfg.camTarget.y, cfg.camTarget.z);
+    }
+
+    // ==========================================
+    // 9. 六大關卡執行與 3D 動畫演繹
+    // ==========================================
+    function executeStageAction(stageId) {
+      if (appState.isAnimating) return;
+      appState.isAnimating = true;
+      renderRightPanel(); // 更新按鈕為執行中狀態
+
+      if (stageId === 1) {
+        // 第一關：培養土袋飛向花盆並傾倒培養土
+        const bag = tools.soilBag;
+        playSoundEffect('soil');
+        animateTween(650, (t) => {
+          bag.group.position.lerpVectors(bag.homePos, new THREE.Vector3(-0.9, 3.3, 0.2), t);
+          bag.group.rotation.z = -1.1 * t;
+        }, () => {
+          soilMesh.visible = true;
+          animateTween(900, (t) => {
+            soilMesh.scale.y = Math.max(0.01, t);
+          }, () => {
+            animateTween(500, (t) => {
+              bag.group.position.lerpVectors(new THREE.Vector3(-0.9, 3.3, 0.2), bag.homePos, t);
+              bag.group.rotation.z = -1.1 * (1 - t);
+            }, () => {
+              bag.group.rotation.copy(bag.homeRot);
+              advanceToNextStage();
+            });
+          });
+        });
+      } else if (stageId === 2) {
+        // 第二關：小鏟子移動到土中央挖出可見小洞
+        const tr = tools.trowel;
+        playSoundEffect('dig');
+        animateTween(600, (t) => {
+          tr.group.position.lerpVectors(tr.homePos, new THREE.Vector3(0, 2.85, 0.15), t);
+          tr.group.rotation.set(0, 0, 0);
+        }, () => {
+          animateTween(750, (t) => {
+            tr.group.position.y = 2.85 - Math.sin(t * Math.PI) * 0.65;
+            tr.group.rotation.x = Math.sin(t * Math.PI * 2) * 0.25;
+            if (t > 0.45 && !soilMesh.userData.hasHole) {
+              soilMesh.userData.hasHole = true;
+              soilMesh.geometry.dispose();
+              soilMesh.geometry = createSoilProfileGeometry(true, false);
+              spawnParticles('soil', new THREE.Vector3(0, 2.35, 0.2));
+            }
+          }, () => {
+            animateTween(500, (t) => {
+              tr.group.position.lerpVectors(new THREE.Vector3(0, 2.85, 0.15), tr.homePos, t);
+              tr.group.rotation.set(
+                tr.homeRot.x * t,
+                tr.homeRot.y * t,
+                tr.homeRot.z * t
+              );
+            }, () => {
+              advanceToNextStage();
+            });
+          });
+        });
+      } else if (stageId === 3) {
+        // 第三關：種子包傾斜，將種子放入剖面小洞中
+        const sp = tools.seedPacket;
+        playSoundEffect('click');
+        animateTween(600, (t) => {
+          sp.group.position.lerpVectors(sp.homePos, new THREE.Vector3(0.45, 3.0, 0.15), t);
+          sp.group.rotation.set(0, 0, 0.85 * t);
+        }, () => {
+          seedsGroup.visible = true;
+          seedsGroup.position.y = 0.7;
+          animateTween(650, (t) => {
+            seedsGroup.position.y = 0.7 * (1 - t);
+          }, () => {
+            animateTween(500, (t) => {
+              sp.group.position.lerpVectors(new THREE.Vector3(0.45, 3.0, 0.15), sp.homePos, t);
+              sp.group.rotation.set(
+                sp.homeRot.x * t,
+                sp.homeRot.y * t,
+                0.85 * (1 - t)
+              );
+            }, () => {
+              advanceToNextStage();
+            });
+          });
+        });
+      } else if (stageId === 4) {
+        // 第四關：覆土（將小洞填平，種子仍留在土層內部）
+        const tr = tools.trowel;
+        playSoundEffect('soil');
+        animateTween(550, (t) => {
+          tr.group.position.lerpVectors(tr.homePos, new THREE.Vector3(0.35, 2.75, 0.15), t);
+          tr.group.rotation.set(0.2, 0, 0.4);
+        }, () => {
+          animateTween(700, (t) => {
+            tr.group.position.x = 0.35 - Math.sin(t * Math.PI) * 0.55;
+            if (t > 0.5 && !soilMesh.userData.isCovered) {
+              soilMesh.userData.isCovered = true;
+              soilMesh.geometry.dispose();
+              soilMesh.geometry = createSoilProfileGeometry(true, true);
+            }
+          }, () => {
+            animateTween(500, (t) => {
+              tr.group.position.lerpVectors(new THREE.Vector3(0.35, 2.75, 0.15), tr.homePos, t);
+              tr.group.rotation.copy(tr.homeRot);
+            }, () => {
+              advanceToNextStage();
+            });
+          });
+        });
+      } else if (stageId === 5) {
+        // 第五關：澆水 → 土壤變濕潤深色 → 葉子長出、白蘿蔔從土壤交界處冒出！
+        const can = tools.wateringCan;
+        playSoundEffect('water');
+        animateTween(600, (t) => {
+          can.group.position.lerpVectors(can.homePos, new THREE.Vector3(1.45, 3.25, 0.1), t);
+          can.group.rotation.set(0, 0, 0.55 * t);
+        }, () => {
+          spawnParticles('water', new THREE.Vector3(0.1, 2.8, 0.1));
+          // 土壤顏色轉為濕潤深褐色
+          animateTween(800, (t) => {
+            soilMat.color.lerpColors(soilColorDry, soilColorWet, t);
+          }, () => {
+            // 收回水壺，接著播放白蘿蔔破土生長動畫！
+            animateTween(450, (t) => {
+              can.group.position.lerpVectors(new THREE.Vector3(1.45, 3.25, 0.1), can.homePos, t);
+              can.group.rotation.set(0, can.homeRot.y * t, 0.55 * (1 - t));
+            }, () => {
+              playSoundEffect('growth');
+              seedsGroup.visible = false;
+              radishGroup.visible = true;
+              radishGroup.position.y = 1.25;
+              animateTween(1300, (t) => {
+                const s = 0.05 + t * 0.95;
+                radishGroup.scale.set(s, s, s);
+                // 向上推進，使白蘿蔔上半截清楚冒出土壤交界處 (y=2.15)
+                radishGroup.position.y = 1.25 + t * (RADISH_GROWN_Y - 1.25);
+              }, () => {
+                advanceToNextStage();
+              });
+            });
+          });
+        });
+      } else if (stageId === 6) {
+        // 第六關：由按鈕觸發一鍵往上拔出白蘿蔔
+        completePullOutRadish();
+      }
+    }
+
+    function completePullOutRadish() {
+      if (appState.isAnimating && appState.pullProgress >= 1) return;
+      appState.isAnimating = true;
+      appState.pullProgress = 1;
+      updatePullProgressUI(1);
+
+      playSoundEffect('soil');
+      spawnParticles('soil', new THREE.Vector3(0, 2.35, 0.25));
+
+      const startY = radishGroup.position.y;
+      const targetY = 3.85; // 完全拔出懸浮在盆器上方展示
+
+      animateTween(750, (t) => {
+        radishGroup.position.y = startY + (targetY - startY) * t;
+        radishGroup.rotation.z = Math.sin(t * Math.PI * 3) * 0.08 * (1 - t);
+      }, () => {
+        radishGroup.rotation.z = 0;
+        playSoundEffect('celebrate');
+        speakText('太棒了！白蘿蔔大豐收！你把白蘿蔔拔出來了！');
+        appState.isAnimating = false;
+        setTimeout(() => {
+          document.getElementById('celebration-modal').classList.remove('hidden');
+        }, 450);
+      });
+    }
+
+    function advanceToNextStage() {
+      appState.isAnimating = false;
+      appState.hasRevealedHintInPractice = false;
+      if (appState.currentStage < 6) {
+        appState.currentStage += 1;
+        setCameraFocusForStage(appState.currentStage);
+        updateStageUI();
+        const stg = STAGES[appState.currentStage - 1];
+        speakText(stg.tts);
+      }
+    }
+
+    // ==========================================
+    // 10. 第六關「往上滑拔蘿蔔」觸控與滑鼠手勢偵測
+    // ==========================================
+    const raycaster = new THREE.Raycaster();
+    const pointerNDC = new THREE.Vector2();
+
+    function getPointerNDC(clientX, clientY) {
+      const rect = canvasEl.getBoundingClientRect();
+      pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    }
+
+    function handlePointerDown(clientX, clientY) {
+      if (appState.isAnimating) return;
+
+      // 防連點保護 (400ms)
+      const now = performance.now();
+      if (now - appState.lastActionTime < 400) return;
+
+      getPointerNDC(clientX, clientY);
+      raycaster.setFromCamera(pointerNDC, camera);
+      const hits = raycaster.intersectObjects(interactiveObjects, false);
+
+      if (appState.currentStage === 6) {
+        // 第六關：允許從白蘿蔔附近開始往上滑動（擴大容錯判定，即使點到花盆上半部也能順暢拔蘿蔔）
+        if (hits.length > 0 || (Math.abs(pointerNDC.x) < 0.45 && pointerNDC.y > -0.45 && pointerNDC.y < 0.65)) {
+          appState.isDraggingRadish = true;
+          appState.dragStartY = clientY;
+        }
+        return;
+      }
+
+      // 第 1~5 關：點擊 3D 場景中的工具
+      if (hits.length > 0) {
+        appState.lastActionTime = now;
+        const clickedKey = hits[0].object.userData.interactKey;
+        const currentCfg = STAGES[appState.currentStage - 1];
+        const expectedKey = currentCfg.toolKey === 'trowelCover' ? 'trowel' : currentCfg.toolKey;
+
+        if (clickedKey === expectedKey) {
+          executeStageAction(appState.currentStage);
+        } else {
+          handleWrongSelection();
+        }
+      }
+    }
+
+    function handlePointerMove(clientY) {
+      if (!appState.isDraggingRadish || appState.currentStage !== 6 || appState.isAnimating) return;
+
+      const deltaY = appState.dragStartY - clientY; // 往上滑動為正值
+      const requiredSwipePx = 110; // 僅需往上滑動 110px 即可拔出，兼顧平板與幼童肌力
+      const progress = Math.max(0, Math.min(1, deltaY / requiredSwipePx));
+      appState.pullProgress = progress;
+      updatePullProgressUI(progress);
+
+      // 隨手指往上滑動，白蘿蔔即時跟著往上移動（具阻力回饋感）
+      radishGroup.position.y = RADISH_GROWN_Y + progress * 0.95;
+      radishGroup.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
+
+      if (progress >= 1) {
+        appState.isDraggingRadish = false;
+        completePullOutRadish();
+      }
+    }
+
+    function handlePointerUp() {
+      if (!appState.isDraggingRadish) return;
+      appState.isDraggingRadish = false;
+      if (appState.pullProgress < 1 && !appState.isAnimating) {
+        // 未拔出時溫和彈回原位
+        const currentY = radishGroup.position.y;
+        animateTween(250, (t) => {
+          radishGroup.position.y = currentY + (RADISH_GROWN_Y - currentY) * t;
+          radishGroup.rotation.z = 0;
+          updatePullProgressUI(appState.pullProgress * (1 - t));
+        }, () => {
+          appState.pullProgress = 0;
+          updatePullProgressUI(0);
+        });
+      }
+    }
+
+    function updatePullProgressUI(progress) {
+      const bar = document.getElementById('pull-progress-bar');
+      if (bar) {
+        bar.style.width = `${Math.round(progress * 100)}%`;
+      }
+    }
+
+    // 滑鼠事件
+    canvasEl.addEventListener('mousedown', (e) => handlePointerDown(e.clientX, e.clientY));
+    window.addEventListener('mousemove', (e) => handlePointerMove(e.clientY));
+    window.addEventListener('mouseup', () => handlePointerUp());
+
+    // 觸控事件（平板與觸控螢幕）
+    canvasEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 0) {
+        handlePointerDown(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      if (appState.isDraggingRadish && e.touches.length > 0) {
+        handlePointerMove(e.touches[0].clientY);
+      }
+    }, { passive: true });
+    window.addEventListener('touchend', () => handlePointerUp());
+
+    // ==========================================
+    // 11. 右側 20% 控制面板渲染與差異化教學邏輯
+    // ==========================================
+    function handleWrongSelection() {
+      playSoundEffect('retry');
+      appState.hasRevealedHintInPractice = true;
+      renderRightPanel();
+
+      const toast = document.getElementById('feedback-toast');
+      const stg = STAGES[appState.currentStage - 1];
+      toast.textContent = `再試試看喔！${stg.hint}`;
+      toast.classList.remove('hidden');
+      speakText(`再試試看喔！${stg.tts}`);
+
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 3200);
+    }
+
+    function updateStageUI() {
+      const stg = STAGES[appState.currentStage - 1];
+
+      // 更新左上與右上進度顯示
+      document.getElementById('stage-badge-num').textContent = `第 ${stg.id} 關`;
+      document.getElementById('stage-banner-text').textContent = stg.shortBanner;
+      document.getElementById('step-counter-text').textContent = `${stg.id} / 6`;
+
+      // 更新 6 格進度條顏色
+      document.querySelectorAll('#progress-steps > div').forEach((bar) => {
+        const s = Number(bar.dataset.step);
+        if (s < appState.currentStage) {
+          bar.className = 'h-2.5 rounded-full bg-emerald-500 transition-all';
+        } else if (s === appState.currentStage) {
+          bar.className = 'h-2.5 rounded-full bg-amber-400 scale-y-125 transition-all';
+        } else {
+          bar.className = 'h-2.5 rounded-full bg-slate-200 transition-all';
+        }
+      });
+
+      // 更新右面板文字
+      document.getElementById('panel-stage-title').textContent = stg.title;
+      document.getElementById('panel-stage-desc').textContent = stg.desc;
+      document.getElementById('scaffold-hint-text').textContent = stg.hint;
+
+      // 第六關專屬滑動提示 vs 第 1~5 關點擊提示
+      const swipeBox = document.getElementById('swipe-guide-box');
+      const tapHint = document.getElementById('tap-3d-hint');
+      if (appState.currentStage === 6) {
+        swipeBox.classList.remove('hidden');
+        tapHint.classList.add('hidden');
+      } else {
+        swipeBox.classList.add('hidden');
+        tapHint.classList.remove('hidden');
+      }
+
+      renderRightPanel();
+    }
+
+    function renderRightPanel() {
+      const stg = STAGES[appState.currentStage - 1];
+      const container = document.getElementById('action-buttons-container');
+      const hintBox = document.getElementById('scaffold-hint-box');
+
+      // 鷹架提示框顯示規則：學習模式常駐顯示；練習模式答錯後才顯示
+      if (appState.mode === 'learning' || appState.hasRevealedHintInPractice) {
+        hintBox.classList.remove('hidden');
+      } else {
+        hintBox.classList.add('hidden');
+      }
+
+      container.innerHTML = '';
+
+      if (appState.mode === 'learning' || appState.currentStage === 6) {
+        // 學習模式或第六關：顯示單一明確大按鈕 + 脈衝光暈鷹架引導
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.disabled = appState.isAnimating;
+        btn.className = [
+          'w-full min-h-[64px] px-3 py-3 rounded-2xl font-black text-base md:text-lg shadow-md flex items-center justify-center gap-2 transition',
+          appState.isAnimating
+            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+            : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white',
+          (!appState.isAnimating && appState.mode === 'learning') ? 'scaffold-highlight !text-emerald-950' : ''
+        ].join(' ');
+
+        btn.innerHTML = `<span class="text-2xl">${stg.btnIcon}</span><span>${appState.isAnimating ? '進行中...' : stg.btnLabel}</span>`;
+        btn.addEventListener('click', () => {
+          const now = performance.now();
+          if (now - appState.lastActionTime < 400 || appState.isAnimating) return;
+          appState.lastActionTime = now;
+          executeStageAction(appState.currentStage);
+        });
+        container.appendChild(btn);
+      } else {
+        // 練習模式（第 1~5 關）：呈現 3 個工具選項讓學生自主判斷
+        const correctOpt = TOOL_OPTIONS.find(o => o.key === stg.toolKey);
+        const distractors = TOOL_OPTIONS.filter(o => o.key !== stg.toolKey)
+          .sort(() => 0.5 - Math.random())
+          .slice(0, 2);
+        const choices = [correctOpt, ...distractors].sort((a, b) => a.key.localeCompare(b.key));
+
+        choices.forEach(opt => {
+          const isCorrect = opt.key === stg.toolKey;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.disabled = appState.isAnimating;
+          btn.className = [
+            'w-full min-h-[56px] px-3 py-2.5 rounded-2xl font-black text-sm md:text-base border-2 border-slate-300 bg-white hover:bg-emerald-50 active:scale-95 text-slate-800 shadow-sm flex items-center justify-center gap-2 transition',
+            (isCorrect && appState.hasRevealedHintInPractice && !appState.isAnimating) ? 'scaffold-highlight' : ''
+          ].join(' ');
+          btn.innerHTML = `<span class="text-xl">${opt.icon}</span><span>${opt.label}</span>`;
+
+          btn.addEventListener('click', () => {
+            const now = performance.now();
+            if (now - appState.lastActionTime < 400 || appState.isAnimating) return;
+            appState.lastActionTime = now;
+
+            if (isCorrect) {
+              executeStageAction(appState.currentStage);
+            } else {
+              handleWrongSelection();
+            }
+          });
+          container.appendChild(btn);
+        });
+      }
+    }
+
+    // ==========================================
+    // 12. 完整重置（再種一盆）功能
+    // ==========================================
+    function resetSimulation() {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      appState.currentStage = 1;
+      appState.isAnimating = false;
+      appState.pullProgress = 0;
+      appState.isDraggingRadish = false;
+      appState.hasRevealedHintInPractice = false;
+
+      // 重置土壤狀態
+      soilMesh.visible = false;
+      soilMesh.scale.set(1, 0.001, 1);
+      soilMesh.userData.hasHole = false;
+      soilMesh.userData.isCovered = false;
+      soilMesh.geometry.dispose();
+      soilMesh.geometry = createSoilProfileGeometry(false, false);
+      soilMat.color.copy(soilColorDry);
+
+      // 重置種子與白蘿蔔
+      seedsGroup.visible = false;
+      radishGroup.visible = false;
+      radishGroup.scale.set(0.01, 0.01, 0.01);
+      radishGroup.position.set(0, RADISH_GROWN_Y, 0.05);
+      radishGroup.rotation.set(0, 0, 0);
+
+      // 重置工具位置
+      Object.values(tools).forEach(t => {
+        t.group.position.copy(t.homePos);
+        t.group.rotation.copy(t.homeRot);
+      });
+
+      updatePullProgressUI(0);
+      document.getElementById('celebration-modal').classList.add('hidden');
+      setCameraFocusForStage(1);
+      updateStageUI();
+      speakText(STAGES[0].tts);
+    }
+
+    // ==========================================
+    // 13. 頂部工具列與老師設定 Modal 事件綁定
+    // ==========================================
+    document.getElementById('btn-mute-toggle').addEventListener('click', () => {
+      appState.isMuted = !appState.isMuted;
+      document.getElementById('mute-icon').textContent = appState.isMuted ? '🔇' : '🔊';
+      document.getElementById('mute-label').textContent = appState.isMuted ? '聲音靜音' : '聲音開啟';
+      if (appState.isMuted && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      } else {
+        playSoundEffect('click');
+        speakText(STAGES[appState.currentStage - 1].tts);
+      }
+    });
+
+    document.getElementById('btn-replay-tts').addEventListener('click', () => {
+      const now = performance.now();
+      if (now - appState.lastActionTime < 400) return;
+      appState.lastActionTime = now;
+      playSoundEffect('click');
+      speakText(STAGES[appState.currentStage - 1].tts);
+    });
+
+    document.getElementById('btn-reset-top').addEventListener('click', () => {
+      playSoundEffect('click');
+      resetSimulation();
+    });
+
+    document.getElementById('btn-plant-again').addEventListener('click', () => {
+      playSoundEffect('click');
+      resetSimulation();
+    });
+
+    // 老師設定視窗控制
+    const teacherModal = document.getElementById('teacher-modal');
+    const btnLearning = document.getElementById('select-learning-mode');
+    const btnPractice = document.getElementById('select-practice-mode');
+
+    function syncTeacherModeButtons() {
+      if (appState.mode === 'learning') {
+        btnLearning.className = 'w-full min-h-[68px] p-4 rounded-2xl border-4 border-emerald-600 bg-emerald-50 text-left flex items-start gap-3 transition';
+        btnPractice.className = 'w-full min-h-[68px] p-4 rounded-2xl border-2 border-slate-200 bg-white hover:bg-amber-50 text-left flex items-start gap-3 transition';
+        document.getElementById('mode-badge').textContent = '目前模式：學習模式（含提示）';
+      } else {
+        btnPractice.className = 'w-full min-h-[68px] p-4 rounded-2xl border-4 border-amber-500 bg-amber-50 text-left flex items-start gap-3 transition';
+        btnLearning.className = 'w-full min-h-[68px] p-4 rounded-2xl border-2 border-slate-200 bg-white hover:bg-emerald-50 text-left flex items-start gap-3 transition';
+        document.getElementById('mode-badge').textContent = '目前模式：練習模式（獨立判斷）';
+      }
+    }
+
+    document.getElementById('btn-teacher-settings').addEventListener('click', () => {
+      playSoundEffect('click');
+      syncTeacherModeButtons();
+      teacherModal.classList.remove('hidden');
+    });
+
+    btnLearning.addEventListener('click', () => {
+      appState.mode = 'learning';
+      playSoundEffect('click');
+      syncTeacherModeButtons();
+      updateStageUI();
+    });
+
+    btnPractice.addEventListener('click', () => {
+      appState.mode = 'practice';
+      appState.hasRevealedHintInPractice = false;
+      playSoundEffect('click');
+      syncTeacherModeButtons();
+      updateStageUI();
+    });
+
+    document.getElementById('btn-close-settings').addEventListener('click', () => {
+      teacherModal.classList.add('hidden');
+    });
+
+    document.getElementById('btn-save-settings').addEventListener('click', () => {
+      playSoundEffect('click');
+      teacherModal.classList.add('hidden');
+    });
+
+    // ==========================================
+    // 14. ResizeObserver 響應式畫布與主渲染迴圈
+    // ==========================================
+    function resizeViewport() {
+      const width = viewportEl.clientWidth;
+      const height = viewportEl.clientHeight;
+      if (width === 0 || height === 0) return;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    }
+
+    const resizeObserver = new ResizeObserver(() => resizeViewport());
+    resizeObserver.observe(viewportEl);
+
+    const clock = new THREE.Clock();
+
+    function animateLoop() {
+      requestAnimationFrame(animateLoop);
+      const elapsed = clock.getElapsedTime();
+
+      // 相機平滑跟隨目前關卡焦點
+      camera.position.lerp(camGoalPos, 0.06);
+      camCurrentTarget.lerp(camGoalTarget, 0.08);
+      camera.lookAt(camCurrentTarget);
+
+      // 學習模式下，為目前關卡對應的 3D 工具加上柔和上下浮動提醒
+      const stg = STAGES[appState.currentStage - 1];
+      Object.entries(tools).forEach(([key, toolObj]) => {
+        const expectedKey = stg.toolKey === 'trowelCover' ? 'trowel' : stg.toolKey;
+        if (!appState.isAnimating && appState.mode === 'learning' && key === expectedKey) {
+          toolObj.group.position.y = toolObj.homePos.y + Math.sin(elapsed * 4) * 0.08;
+        } else if (!appState.isAnimating) {
+          toolObj.group.position.y += (toolObj.homePos.y - toolObj.group.position.y) * 0.15;
+        }
+      });
+
+      // 第五、六關白蘿蔔葉片微風搖曳與慶祝旋轉
+      if (radishGroup.visible) {
+        leavesGroup.rotation.z = Math.sin(elapsed * 2.5) * 0.04;
+        if (!document.getElementById('celebration-modal').classList.contains('hidden')) {
+          radishGroup.rotation.y += 0.025;
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    window.onload = function () {
+      resizeViewport();
+      updateStageUI();
+      animateLoop();
+      // 首次進入頁面延遲一點點播放第一關語音（若瀏覽器阻擋自動播放，點擊重聽或任意按鈕即會發聲）
+      setTimeout(() => {
+        speakText(STAGES[0].tts);
+      }, 600);
+    };
+  </script>
+</body>
+</html>
